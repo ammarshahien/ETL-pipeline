@@ -1,0 +1,55 @@
+from datetime import datetime, timedelta
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.utils.dates import days_ago
+import os
+import logging
+
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'email_on_failure': True,
+    'email_on_retry': False,
+    'retries': 2,
+    'retry_delay': timedelta(minutes=5),
+}
+
+def run_script(script_name, **kwargs):
+    """Execute a Python script from the scripts directory"""
+    script_path = os.path.join(os.path.dirname(__file__), '..', 'scripts', script_name)
+    os.system(f'python {script_path}')
+    logging.info(f"Executed {script_name}")
+
+with DAG(
+    'car_data_pipeline',
+    default_args=default_args,
+    description='ETL pipeline for car price data',
+    schedule_interval='@daily',
+    start_date=days_ago(1),
+    catchup=False,
+    tags=['car_data', 'etl'],
+) as dag:
+
+    # Task 1: Scrape data and load to MongoDB
+    scrape_data = PythonOperator(
+        task_id='scrape_car_data',
+        python_callable=run_script,
+        op_kwargs={'script_name': 'scrape_mongo.py'},
+    )
+
+    # Task 2: Clean and transform data in MongoDB
+    clean_data = PythonOperator(
+        task_id='clean_car_data',
+        python_callable=run_script,
+        op_kwargs={'script_name': 'clean_data_mongo.py'},
+    )
+
+    # Task 3: Transfer data to BigQuery
+    transfer_data = PythonOperator(
+        task_id='transfer_to_bigquery',
+        python_callable=run_script,
+        op_kwargs={'script_name': 'data_trans.py'},
+    )
+
+    # Task dependencies
+    scrape_data >> clean_data >> transfer_data
